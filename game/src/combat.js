@@ -5,8 +5,10 @@ import { WEAPONS } from './config.js';
 import { makeHuman } from './player.js';
 
 export class Enemy {
+  // Hostile gunman: dark clothes, red bandana + vest stripe, gun in hand —
+  // role-readable at screenshot distance without a nameplate.
   constructor(scene, x, z, opts = {}) {
-    this.mesh = makeHuman({ shirt: opts.shirt || 0x30303a, pants: 0x1c1c22, skin: 0xb9825e });
+    this.mesh = makeHuman({ shirt: opts.shirt || 0x30303a, pants: 0x1c1c22, skin: 0xb9825e, accent: 0xc0392b, style: 'bandana', gun: true });
     this.mesh.position.set(x, 0, z);
     scene.add(this.mesh);
     this.health = opts.health || 60;
@@ -98,7 +100,8 @@ export class Combat {
 }
 
 // Shared visual FX: tracer lines, hit sparks and NOS flames, all pooled and
-// short-lived so the loop never allocates per frame for long.
+// short-lived so the loop never allocates per frame for long. Event-driven
+// only — a tracer means a shot, a spark means a hit, a flame means NOS.
 export class FX {
   constructor(scene) {
     this.scene = scene; this.items = [];

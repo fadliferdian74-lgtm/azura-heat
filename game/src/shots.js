@@ -8,6 +8,10 @@ import * as THREE from 'three';
 import { Vehicle } from './vehicles.js';
 import { Enemy } from './combat.js';
 import { makeHuman } from './player.js';
+import { containerTexture } from './materials.js';
+
+// staged cover crates wear the same corrugated container skin as the port
+const crateMat = new THREE.MeshLambertMaterial({ map: containerTexture(), color: 0xffffff });
 
 function car(G, x, z, heading, color, kind, driver = 'parked') {
   const v = new Vehicle(G.scene, x, z, heading, color, kind);
@@ -20,14 +24,15 @@ function cop(G, x, z, heading) {
   return v;
 }
 function ped(G, x, z, heading, shirt, pants = 0x2c3e50) {
-  const m = makeHuman({ shirt, pants, skin: 0xc98d5a });
+  const m = makeHuman({ shirt, pants, skin: 0xc98d5a, accent: pants });
   m.position.set(x, 0, z); m.rotation.y = heading;
   G.scene.add(m);
   return m;
 }
 function crate(G, x, z, color, y = 2.2) {
   const c = new THREE.Mesh(new THREE.BoxGeometry(11, 4.4, 4.6),
-    new THREE.MeshLambertMaterial({ color }));
+    crateMat.clone());
+  c.material.color.setHex(color);
   c.position.set(x, y, z); G.scene.add(c);
   return c;
 }
@@ -44,7 +49,8 @@ function beam(G, x1, y1, z1, x2, y2, z2, color, opacity = 0.95) {
   G.scene.add(l);
   return l;
 }
-// translucent searchlight cone stretched between two points (apex at `from`)
+// translucent searchlight cone stretched between two points (apex at `from`);
+// the chase scene aims one from the helicopter onto the player car
 function lightCone(G, fx, fy, fz, tx, ty, tz, radius = 8.5) {
   const from = new THREE.Vector3(fx, fy, fz), to = new THREE.Vector3(tx, ty, tz);
   const dir = new THREE.Vector3().subVectors(to, from);
@@ -87,6 +93,7 @@ export function poseShot(G, name) {
     // cruiser with its lightbar on behind, traffic + peds filling the street.
     const hero = car(G, 0, 26, -0.55, 0xd64541, 'sport');
     hero.speed = 0;
+    G.ringCar = hero;
     G.player.mesh.position.set(-4.4, 0, 29.8);
     G.player.heading = 0.55; G.player.mesh.rotation.y = 0.55;
     cop(G, -6.5, 3, Math.PI);
@@ -173,6 +180,7 @@ export function poseShot(G, name) {
     G.player.heading = 2.09; G.player.mesh.rotation.y = 2.09;
     const conv = car(G, -46, -386, -2.0, 0xf2b035, 'convertible');
     conv.driver = 'parked';
+    G.ringCar = conv;
     car(G, -16, -348, -Math.PI / 2 + 0.1, 0xeeeeee, 'sedan');
     car(G, -104, -349, Math.PI / 2, 0x53b06a, 'sedan');
     ped(G, -30, -353, -Math.PI / 2, 0xe67e22); ped(G, -64, -350, Math.PI / 2, 0xecf0f1);

@@ -11,9 +11,11 @@ const OUTFITS = [
 ];
 
 export class Pedestrian {
+  // Citizens colour-block their outfit's accent band to their trousers so
+  // a crowd reads as individuals, not uniforms.
   constructor(scene, rand) {
     const o = OUTFITS[Math.floor(rand() * OUTFITS.length)];
-    this.mesh = makeHuman({ shirt: o.shirt, pants: o.pants, skin: 0xc98d5a + Math.floor(rand() * 0x201008) });
+    this.mesh = makeHuman({ shirt: o.shirt, pants: o.pants, skin: 0xc98d5a + Math.floor(rand() * 0x201008), accent: o.pants });
     this.axis = rand() < 0.5 ? 'x' : 'z';
     this.dir = rand() < 0.5 ? 1 : -1;
     this.road = ROADS[Math.floor(rand() * ROADS.length)];
@@ -27,6 +29,7 @@ export class Pedestrian {
   get x() { return this.mesh.position.x; }
   get z() { return this.mesh.position.z; }
   scare(x, z, radius = 26) {
+    // gunfire / near-miss radius: panic makes the crowd readable in motion
     if (dist2d(this.x, this.z, x, z) < radius) this.panic = 2.6;
   }
   update(dt, threats) {

@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { ISLAND_R, PLACES, clamp, dist2d, districtAt } from './config.js';
 import { buildCity, resolveCollisions } from './city.js';
 import { Vehicle, spawnParkedCars } from './vehicles.js';
+import { paintMaterial } from './materials.js';
 import { Player } from './player.js';
 import { spawnTraffic, pruneTraffic } from './traffic.js';
 import { spawnPedestrians, scarePeds } from './pedestrians.js';
@@ -23,6 +24,12 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = false;
+// ACES filmic grade: rolls off the golden-hour highlights and keeps the
+// saturated paint / signage colours rich instead of clipping to white.
+// Exposure 1.12 was tuned on the four shot scenes (sun 3.0 / hemi 1.2 /
+// fill 0.5 key-fill-rim rig) — brighter blows out the sky gradient.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xf2a56e, 230, 1250);
@@ -55,10 +62,10 @@ const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerH
 camera.position.set(-200, 8, -120);
 
 // golden-hour light rig
-const sun = new THREE.DirectionalLight(0xffc98a, 2.6);
+const sun = new THREE.DirectionalLight(0xffc98a, 3.0);
 sun.position.set(-260, 190, -320); scene.add(sun);
-scene.add(new THREE.HemisphereLight(0xffd9b0, 0x33506b, 1.05));
-const fill = new THREE.DirectionalLight(0x7fb2ff, 0.35);
+scene.add(new THREE.HemisphereLight(0xffd9b0, 0x33506b, 1.2));
+const fill = new THREE.DirectionalLight(0x7fb2ff, 0.5);
 fill.position.set(200, 120, 260); scene.add(fill);
 // low sun disc on the horizon, west-northwest over the water
 const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(64, 24), new THREE.MeshBasicMaterial({ color: 0xffe9a8, fog: false }));
@@ -96,10 +103,47 @@ G.anyWitnessNear = r => {
 };
 G.allVehicles = () => [...G.cars, ...G.traffic.map(t => t.car), ...G.director.cops.map(c => c.car), ...G.director.blocks];
 
-// objective beacon: a column of gold light at the current marker
+// objective marker: a column of gold light + a floating chevron over a
+// pulsing ground ring, so the objective reads as an icon, not just a beam
 const beacon = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 60, 14, 1, true),
   new THREE.MeshBasicMaterial({ color: 0xffd34d, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false }));
 beacon.visible = false; scene.add(beacon);
+const markerGroup = new THREE.Group(); markerGroup.visible = false; scene.add(markerGroup);
+const markerRing = new THREE.Mesh(new THREE.RingGeometry(2.3, 3.2, 28),
+  new THREE.MeshBasicMaterial({ color: 0xffd34d, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+markerRing.rotation.x = -Math.PI / 2; markerRing.position.y = 0.25; markerGroup.add(markerRing);
+const markerChevron = new THREE.Mesh(new THREE.ConeGeometry(1.15, 1.7, 4),
+  new THREE.MeshBasicMaterial({ color: 0xffd34d }));
+markerChevron.rotation.x = Math.PI; markerChevron.position.y = 5.6; markerGroup.add(markerChevron);
+function updateMarker() {
+  if (G.marker) {
+    beacon.visible = true;
+    beacon.position.set(G.marker.x, 30, G.marker.z);
+    beacon.material.opacity = 0.3 + Math.sin(G.time * 3) * 0.12;
+    markerGroup.visible = true;
+    markerGroup.position.set(G.marker.x, 0, G.marker.z);
+    const pulse = 1 + Math.sin(G.time * 3) * 0.13;
+    markerRing.scale.set(pulse, pulse, 1);
+    markerRing.material.opacity = 0.55 + Math.sin(G.time * 3) * 0.25;
+    markerChevron.position.y = 5.6 + Math.sin(G.time * 2.4) * 0.55;
+    markerChevron.rotation.y = G.time * 1.6;
+  } else { beacon.visible = false; markerGroup.visible = false; }
+}
+// soft green glow ring under the car the player can enter when close
+// (in shot mode G.ringCar names the staged car it should hug instead)
+const enterRing = new THREE.Mesh(new THREE.RingGeometry(2.7, 3.4, 28),
+  new THREE.MeshBasicMaterial({ color: 0x7dff9a, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+enterRing.rotation.x = -Math.PI / 2; enterRing.visible = false; scene.add(enterRing);
+function updateEnterRing() {
+  const car = G.player.car ? null : (G.shotMode ? G.ringCar : nearestCar(4.6));
+  if (car) {
+    enterRing.visible = true;
+    enterRing.position.set(car.x, 0.22, car.z);
+    enterRing.material.opacity = 0.4 + 0.25 * Math.sin(G.time * 5);
+    const p = 1 + Math.sin(G.time * 5) * 0.05;
+    enterRing.scale.set(p, p, 1);
+  } else enterRing.visible = false;
+}
 
 // --- input -------------------------------------------------------------------
 let mouseDown = false, pointerLocked = false;
@@ -237,7 +281,9 @@ function checkZones(dt) {
       G.cash -= cost; paintCooldown = 3;
       G.player.car.health = 100; G.player.car.dead = false;
       const palette = [0xd64541, 0x3f7fd1, 0xf2b035, 0x53b06a, 0xb053c9, 0x16a3a3, 0xeeeeee];
-      G.player.car.mesh.userData.paint.color.setHex(palette[Math.floor(Math.random() * palette.length)]);
+      const newPaint = paintMaterial(palette[Math.floor(Math.random() * palette.length)]);
+      G.player.car.mesh.userData.body.material = newPaint;
+      G.player.car.mesh.userData.paint = newPaint;
       G.wanted.clear();
       G.hud.toast('Azura Paint & Repair: fixed, resprayed, heat gone — $' + cost);
       G.audio.pickup();
@@ -360,11 +406,8 @@ function frame() {
   if (G.state === 'playing' && G.shotMode) {
     // screenshot staging: the posed scene is frozen exactly as arranged in
     // shots.js — only the HUD (stars, minimap, dialogue timers) animates.
-    if (G.marker) {
-      beacon.visible = true;
-      beacon.position.set(G.marker.x, 30, G.marker.z);
-      beacon.material.opacity = 0.3 + Math.sin(G.time * 3) * 0.12;
-    } else beacon.visible = false;
+    updateMarker();
+    updateEnterRing();
     G.hud.update(dt);
   } else if (G.state === 'playing') {
     // player locomotion
@@ -410,17 +453,22 @@ function frame() {
       }
     }
     // marker beacon follows the objective
-    if (G.marker) {
-      beacon.visible = true;
-      beacon.position.set(G.marker.x, 30, G.marker.z);
-      beacon.material.opacity = 0.3 + Math.sin(G.time * 3) * 0.12;
-    } else beacon.visible = false;
+    updateMarker();
+    updateEnterRing();
     G.hud.update(dt);
   }
   G.fx.update(dt);
   G.audio.update(dt, G);
   updateCamera(dt);
   renderer.render(scene, camera);
+  // performance evidence: renderer diagnostics for the screenshot pipeline
+  if (G.shotMode) {
+    const info = renderer.info;
+    window.__diag = {
+      calls: info.render.calls, triangles: info.render.triangles,
+      geometries: info.memory.geometries, textures: info.memory.textures,
+    };
+  }
 }
 
 // screenshot mode: ?shot=<scene> boots straight into a posed scene
