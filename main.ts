@@ -29,7 +29,7 @@ const dossier = buildDossier(out, {
   game_max_bytes: 50331648,
   game_path_max_bytes: 1000,
 });
-writeFileSync(join(out, 'dossier.json'), JSON.stringify(dossier, null, 2));
+writeFileSync(join(out, 'dossier.json'), dossier);
 const gameFiles = readdirSync(join(out, 'game'), { recursive: true }).length;
 const shotCount = existsSync(join(out, 'screenshots')) ? readdirSync(join(out, 'screenshots')).length : 0;
-console.log(`AZURA HEAT: build written to ${out} (${gameFiles} game files, ${shotCount} screenshots)`);
+console.log(`AZURA HEAT: build written to ${out} (${gameFiles} game files, ${shotCount} screenshots, dossier ${dossier.length} bytes)`);
