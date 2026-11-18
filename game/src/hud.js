@@ -75,28 +75,65 @@ export class HUD {
   }
   drawMinimap() {
     const G = this.G, ctx = this.ctx, S = 176, half = S / 2;
-    const scale = S / (CITY_HALF * 2 + 160);
+    const scale = S / 1040;               // whole island + a rim of ocean
     const px = v => half + v * scale;
-    ctx.fillStyle = '#1d5f86'; ctx.fillRect(0, 0, S, S);
-    ctx.fillStyle = '#c9b183';
-    ctx.beginPath(); ctx.arc(half, half, 470 * scale, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#565d63';
+    // ocean
+    const sea = ctx.createLinearGradient(0, 0, 0, S);
+    sea.addColorStop(0, '#2b7fb8'); sea.addColorStop(1, '#174f78');
+    ctx.fillStyle = sea; ctx.fillRect(0, 0, S, S);
+    // sand island + beach ring
+    ctx.fillStyle = '#e6cf97';
+    ctx.beginPath(); ctx.arc(half, half, 478 * scale, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,246,200,0.8)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(half, half, 466 * scale, 0, Math.PI * 2); ctx.stroke();
+    // city slab
+    ctx.fillStyle = '#79866c';
+    ctx.fillRect(px(-CITY_HALF), px(-CITY_HALF), CITY_HALF * 2 * scale, CITY_HALF * 2 * scale);
+    // district tints: downtown gold heart, docks steel, beach strip pale
+    ctx.fillStyle = 'rgba(255,176,58,0.30)';
+    ctx.fillRect(px(-110), px(-110), 220 * scale, 220 * scale);
+    ctx.fillStyle = 'rgba(110,135,160,0.40)';
+    ctx.fillRect(px(-CITY_HALF), px(190), CITY_HALF * 2 * scale, 140 * scale);
+    ctx.fillStyle = 'rgba(255,230,160,0.45)';
+    ctx.fillRect(px(-CITY_HALF), px(-CITY_HALF), CITY_HALF * 2 * scale, 130 * scale);
+    // roads: dark bed + lighter centre so the grid reads at a glance
     for (const r of ROADS) {
-      ctx.fillRect(px(r) - 3, px(-CITY_HALF), 6, CITY_HALF * 2 * scale);
-      ctx.fillRect(px(-CITY_HALF), px(r) - 3, CITY_HALF * 2 * scale, 6);
+      ctx.fillStyle = '#333a41';
+      ctx.fillRect(px(r) - 3.4, px(-CITY_HALF), 6.8, CITY_HALF * 2 * scale);
+      ctx.fillRect(px(-CITY_HALF), px(r) - 3.4, CITY_HALF * 2 * scale, 6.8);
+      ctx.fillStyle = '#79828c';
+      ctx.fillRect(px(r) - 1, px(-CITY_HALF), 2, CITY_HALF * 2 * scale);
+      ctx.fillRect(px(-CITY_HALF), px(r) - 1, CITY_HALF * 2 * scale, 2);
     }
-    const dot = (x, z, color, r = 3) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(px(x), px(z), r, 0, Math.PI * 2); ctx.fill(); };
-    for (const t of G.traffic || []) dot(t.car.x, t.car.z, '#dddddd', 2);
-    for (const c of G.copPositions || []) dot(c.x, c.z, (Math.floor(performance.now() / 300) % 2 ? '#ff4444' : '#4488ff'), 3);
-    for (const e of G.enemies || []) if (!e.dead) dot(e.x, e.z, '#ff2222', 2.5);
-    if (G.marker) { dot(G.marker.x, G.marker.z, '#ffd34d', 4.5); }
-    // player arrow
+    const dot = (x, z, color, r = 3) => {
+      ctx.fillStyle = 'rgba(10,14,18,0.75)';
+      ctx.beginPath(); ctx.arc(px(x), px(z), r + 1.1, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(px(x), px(z), r, 0, Math.PI * 2); ctx.fill();
+    };
+    for (const t of G.traffic || []) dot(t.car.x, t.car.z, '#f2f2f2', 1.9);
+    for (const c of G.cars || []) if (c.driver === 'parked') dot(c.x, c.z, '#b9c2c9', 1.6);
+    const copFlash = Math.floor(performance.now() / 300) % 2 ? '#ff4444' : '#4488ff';
+    for (const c of G.copPositions || []) dot(c.x, c.z, copFlash, 3.2);
+    for (const e of G.enemies || []) if (!e.dead) dot(e.x, e.z, '#ff2222', 2.6);
+    if (G.marker) {
+      const pulse = 6.5 + Math.sin(performance.now() / 240) * 1.8;
+      ctx.strokeStyle = '#ffd34d'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(px(G.marker.x), px(G.marker.z), pulse, 0, Math.PI * 2); ctx.stroke();
+      dot(G.marker.x, G.marker.z, '#ffd34d', 3.6);
+    }
+    // player arrow with a dark outline
     const p = G.player.pos;
     const h = G.player.car ? G.player.car.heading : G.player.heading;
     ctx.save(); ctx.translate(px(p.x), px(p.z)); ctx.rotate(-h);
+    ctx.fillStyle = '#10151a';
+    ctx.beginPath(); ctx.moveTo(0, -7.6); ctx.lineTo(5.2, 6); ctx.lineTo(-5.2, 6); ctx.closePath(); ctx.fill();
     ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(4, 5); ctx.lineTo(-4, 5); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(4, 4.8); ctx.lineTo(-4, 4.8); ctx.closePath(); ctx.fill();
     ctx.restore();
+    // frame
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
+    ctx.strokeRect(1, 1, S - 2, S - 2);
   }
 }
 

@@ -11,13 +11,22 @@ export class CopCar {
     this.car.driver = 'police';
     this.flashT = Math.random() * 6;
     this.stuckT = 0;
+    this.bestD = Infinity; this.watchT = 0; this.directT = 0;
   }
   get x() { return this.car.x; } get z() { return this.car.z; }
   update(dt, target) {
     const c = this.car;
     const d = dist2d(c.x, c.z, target.x, target.z);
+    // progress watchdog: the road-grid waypoint logic can settle into a
+    // limit cycle around a block for some spawn angles and never close
+    // in. If the gap has not shrunk for 4 s, drop the waypoints and
+    // pursue directly for 5 s (cops may cut across a block), then retry.
+    if (d < this.bestD - 3) { this.bestD = d; this.watchT = 0; }
+    this.watchT += dt;
+    if (this.watchT > 4) { this.directT = 5; this.watchT = 0; this.bestD = d; }
+    if (this.directT > 0) this.directT -= dt;
     let tx = target.x, tz = target.z;
-    if (d > 55) {
+    if (d > 55 && this.directT <= 0) {
       // road-grid steering: head to the road line nearest the target first
       if (Math.abs(c.x - target.x) > Math.abs(c.z - target.z)) tz = nearestRoad(c.z) + (c.z > target.z ? 6 : -6) * 0;
       else tx = nearestRoad(c.x);
@@ -32,10 +41,14 @@ export class CopCar {
     c.drive(dt, { throttle: speedWanted, steer: c.steer, brake: false, hand: false, nos: false });
     if (Math.abs(c.speed) < 1 && d > 14) { this.stuckT += dt; if (this.stuckT > 2.2) { c.heading += Math.PI; this.stuckT = 0; } }
     else this.stuckT = 0;
-    // lightbar strobing
+    // lightbar strobing (children: 0 base, 1 red, 2 blue, 3 red halo, 4 blue halo)
     this.flashT += dt * 9;
     const bar = c.mesh.userData.lightbar;
-    if (bar) { bar.children[0].visible = Math.sin(this.flashT) > 0; bar.children[1].visible = Math.sin(this.flashT) <= 0; }
+    if (bar) {
+      const phase = Math.sin(this.flashT) > 0;
+      bar.children[1].visible = phase; bar.children[3].visible = phase;
+      bar.children[2].visible = !phase; bar.children[4].visible = !phase;
+    }
     c.sync();
   }
   remove(scene) { this.car.remove(scene); }
@@ -57,6 +70,14 @@ export class Helicopter {
       new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.35, depthWrite: false }));
     pool.rotation.x = -Math.PI / 2; pool.position.y = 0.25;
     this.pool = pool; scene.add(pool);
+    // visible searchlight cone from the belly down to the light pool, so the
+    // beam reads in screenshots even against a bright sky
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(10.5, 37, 20, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.15, side: THREE.DoubleSide, depthWrite: false, fog: false }));
+    cone.position.y = -19.5; g.add(cone); this.cone = cone;
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0xfff6cf, fog: false }));
+    lamp.position.y = -1.2; g.add(lamp);
     this.mesh = g; this.active = false; this.t = 0;
     g.visible = false; scene.add(g);
   }

@@ -38,11 +38,25 @@ export function makeCarMesh(color, kind = 'sedan') {
     }
   }
   if (kind === 'police') {
+    // chunky lightbar: dark base, bright red/blue blocks and translucent
+    // halo boxes so the strobes read at distance and in screenshots.
     const bar = new THREE.Group();
-    const red = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.22, 0.5), new THREE.MeshBasicMaterial({ color: 0xff2222 }));
-    const blue = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.22, 0.5), new THREE.MeshBasicMaterial({ color: 0x2266ff }));
-    red.position.x = -0.3; blue.position.x = 0.3; bar.add(red, blue);
-    bar.position.y = 1.95; g.add(bar); g.userData.lightbar = bar;
+    const base = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.14, 0.58), new THREE.MeshLambertMaterial({ color: 0x14161c }));
+    bar.add(base);
+    const red = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.3, 0.54), new THREE.MeshBasicMaterial({ color: 0xff2a2a }));
+    const blue = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.3, 0.54), new THREE.MeshBasicMaterial({ color: 0x2a6bff }));
+    red.position.set(-0.37, 0.2, 0); blue.position.set(0.37, 0.2, 0);
+    const redGlow = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.6, 0.85),
+      new THREE.MeshBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.32, depthWrite: false }));
+    const blueGlow = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.6, 0.85),
+      new THREE.MeshBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.32, depthWrite: false }));
+    redGlow.position.copy(red.position); blueGlow.position.copy(blue.position);
+    bar.add(red, blue, redGlow, blueGlow);
+    bar.position.y = 1.8; g.add(bar); g.userData.lightbar = bar;
+    // red/blue light spill on the road under the cruiser
+    const spill = new THREE.Mesh(new THREE.CircleGeometry(3.4, 18),
+      new THREE.MeshBasicMaterial({ color: 0x8855ff, transparent: true, opacity: 0.16, depthWrite: false }));
+    spill.rotation.x = -Math.PI / 2; spill.position.y = 0.16; g.add(spill);
   }
   const wheels = [];
   const wg = new THREE.CylinderGeometry(0.42, 0.42, 0.3, 10);

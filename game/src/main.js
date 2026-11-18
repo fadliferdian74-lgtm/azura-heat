@@ -25,8 +25,32 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = false;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xff9e5e);
-scene.fog = new THREE.Fog(0xf7a56b, 180, 900);
+scene.fog = new THREE.Fog(0xf2a56e, 230, 1250);
+// golden-hour sky dome: dusk blue up top melting through peach to a warm
+// horizon glow in every direction (replaces the old flat orange backdrop)
+const skyDome = new THREE.Mesh(
+  new THREE.SphereGeometry(1650, 28, 14),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: [
+      'varying vec3 vP;',
+      'void main(){',
+      '  float h = normalize(vP).y;',
+      '  vec3 top = vec3(0.13, 0.26, 0.52);',
+      '  vec3 mid = vec3(0.97, 0.52, 0.30);',
+      '  vec3 hor = vec3(1.00, 0.83, 0.55);',
+      '  vec3 c = h > 0.22 ? mix(mid, top, smoothstep(0.22, 0.72, h))',
+      '                    : mix(hor, mid, smoothstep(-0.03, 0.22, h));',
+      // warm sun glow centred on the sun disc's azimuth (west-northwest)
+      '  vec3 sd = normalize(vec3(-0.82, 0.10, -0.50));',
+      '  float g = pow(max(dot(normalize(vP), sd), 0.0), 18.0);',
+      '  c += vec3(1.0, 0.62, 0.25) * g * 0.55;',
+      '  gl_FragColor = vec4(c, 1.0);',
+      '}',
+    ].join('\n'),
+  }));
+scene.add(skyDome);
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 2400);
 camera.position.set(-200, 8, -120);
 
@@ -36,9 +60,11 @@ sun.position.set(-260, 190, -320); scene.add(sun);
 scene.add(new THREE.HemisphereLight(0xffd9b0, 0x33506b, 1.05));
 const fill = new THREE.DirectionalLight(0x7fb2ff, 0.35);
 fill.position.set(200, 120, 260); scene.add(fill);
-// low sun disc on the horizon
-const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(60, 24), new THREE.MeshBasicMaterial({ color: 0xffe9a8, fog: false }));
-sunDisc.position.set(-620, 90, -820); sunDisc.lookAt(0, 40, 0); scene.add(sunDisc);
+// low sun disc on the horizon, west-northwest over the water
+const sunDisc = new THREE.Mesh(new THREE.CircleGeometry(64, 24), new THREE.MeshBasicMaterial({ color: 0xffe9a8, fog: false }));
+sunDisc.position.set(-880, 95, -540); sunDisc.lookAt(0, 40, 0); scene.add(sunDisc);
+const sunHalo = new THREE.Mesh(new THREE.CircleGeometry(150, 24), new THREE.MeshBasicMaterial({ color: 0xffbe78, transparent: true, opacity: 0.35, fog: false, depthWrite: false }));
+sunHalo.position.set(-885, 95, -545); sunHalo.lookAt(0, 40, 0); scene.add(sunHalo);
 
 const city = buildCity(scene);
 
@@ -331,7 +357,16 @@ function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   G.time += dt;
   city.update(dt);
-  if (G.state === 'playing') {
+  if (G.state === 'playing' && G.shotMode) {
+    // screenshot staging: the posed scene is frozen exactly as arranged in
+    // shots.js — only the HUD (stars, minimap, dialogue timers) animates.
+    if (G.marker) {
+      beacon.visible = true;
+      beacon.position.set(G.marker.x, 30, G.marker.z);
+      beacon.material.opacity = 0.3 + Math.sin(G.time * 3) * 0.12;
+    } else beacon.visible = false;
+    G.hud.update(dt);
+  } else if (G.state === 'playing') {
     // player locomotion
     if (G.player.car) drivePlayer(dt);
     else {

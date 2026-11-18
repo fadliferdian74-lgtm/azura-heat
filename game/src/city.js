@@ -141,6 +141,54 @@ export function buildCity(scene) {
     boat.rotation.y = Math.PI / 2; group.add(boat);
   }
 
+  // --- beach boardwalk, umbrellas, vendor cart + extra boats ----------------
+  // The south shore (z < -330) is pure sand; dress it so the beach reads as a
+  // lived-in strip: a plank boardwalk, umbrellas + towels, a snack cart and
+  // sailboats anchored on the water. Visual only — no colliders out here.
+  const boardwalk = new THREE.Mesh(new THREE.BoxGeometry(400, 0.3, 7),
+    new THREE.MeshLambertMaterial({ color: 0x9a6b45 }));
+  boardwalk.position.set(-60, 0.15, -352); group.add(boardwalk);
+  const plankMat = new THREE.MeshLambertMaterial({ color: 0x7d5636 });
+  for (let px = -250; px < 135; px += 10) {
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 7), plankMat);
+    plank.position.set(px, 0.16, -352); group.add(plank);
+  }
+  const umbCols = [0xe74c3c, 0xf2b035, 0x16a3a3, 0xecf0f1, 0xe84393, 0x53b6ff];
+  const poleMat = new THREE.MeshLambertMaterial({ color: 0xd8d8d8 });
+  for (let i = 0; i < 9; i++) {
+    const ux = -168 + i * 24 + rand() * 7, uz = -376 - (i % 3) * 15 - rand() * 5;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 2.7), poleMat);
+    pole.position.set(ux, 1.35, uz); group.add(pole);
+    const canopy = new THREE.Mesh(new THREE.ConeGeometry(2.3, 0.85, 8),
+      new THREE.MeshLambertMaterial({ color: umbCols[i % umbCols.length] }));
+    canopy.position.set(ux, 2.85, uz); group.add(canopy);
+    const towel = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.07, 0.95),
+      new THREE.MeshLambertMaterial({ color: umbCols[(i + 2) % umbCols.length] }));
+    towel.position.set(ux + 1.8, 0.06, uz + 1.2); towel.rotation.y = rand() * 0.8; group.add(towel);
+  }
+  // vendor cart on the boardwalk's landward edge
+  const cart = new THREE.Group();
+  const cartBody = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.5, 1.7),
+    new THREE.MeshLambertMaterial({ color: 0xf4f1e8 })); cartBody.position.y = 1.05; cart.add(cartBody);
+  const cartTop = new THREE.Mesh(new THREE.BoxGeometry(3.3, 0.16, 2.2),
+    new THREE.MeshLambertMaterial({ color: 0xff6b81 })); cartTop.position.y = 2.35; cart.add(cartTop);
+  for (const wx of [-1, 1]) {
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.14, 10),
+      new THREE.MeshLambertMaterial({ color: 0x333333 }));
+    wheel.rotation.x = Math.PI / 2; wheel.position.set(wx * 1.05, 0.42, 0.9); cart.add(wheel);
+  }
+  cart.position.set(-36, 0, -357.5); cart.rotation.y = 0.25; group.add(cart);
+  // sailboats anchored off the south shore + a couple off the docks
+  const sailMat = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+  for (const [bx, bz, bry] of [[-195, -520, 0.4], [-75, -548, -0.3], [35, -522, 0.9], [-285, -498, 0.1], [125, -545, -0.7], [225, 505, 2.4], [-205, 510, 2.9]]) {
+    const boat = new THREE.Group();
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.3, 8.6), hullMat); hull.position.y = 0.3; boat.add(hull);
+    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 8.6), mastMat); mast.position.y = 4.6; boat.add(mast);
+    const sail = new THREE.Mesh(new THREE.ConeGeometry(1.9, 5.6, 3), sailMat);
+    sail.position.set(0, 4.4, 0.9); sail.scale.z = 0.25; boat.add(sail);
+    boat.position.set(bx, -1.1, bz); boat.rotation.y = bry; group.add(boat);
+  }
+
   function update(dt) {
     anim.t += dt;
     if (anim.water) {
