@@ -1,61 +1,89 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
+// AZURA HEAT — shared configuration for the island city of Port Azura.
+// Everything the other modules agree on lives here: the road grid, the district
+// layout, the tuning numbers for driving / wanted / combat, and the seeded
+// random generator that makes the city identical on every load.
 
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
+export const TITLE = 'AZURA HEAT';
+export const CITY_SEED = 20261118;
 
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
-export const STEP = 1 / 60;
+/** Half-extent of the island in world units; water takes over past the sand. */
+export const ISLAND = 300;
+/** Road centre-lines on both axes. Blocks between neighbouring roads hold buildings. */
+export const ROADS = [-240, -160, -80, 0, 80, 160, 240];
+export const ROAD_W = 15;
+export const LANE = 3.8;
 
 export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+  walkSpeed: 7, runSpeed: 12, radius: 0.9, maxHealth: 100,
+  start: { x: 12, z: 196 }, // Beach strip, facing the city.
+};
+export const CAR = {
+  accel: 26, brake: 34, reverse: 12, maxSpeed: 46, maxReverse: 14,
+  steer: 1.9, grip: 7.5, nosBoost: 30, nosMaxSpeed: 68,
+};
+export const WANTED = {
+  sightRange: 55, hideTime: 7, bustedRange: 4.5, bustedTime: 2.4,
+  copCounts: [0, 2, 3, 5, 6, 8],
+};
+export const WEAPONS = {
+  pistol: { name: 'Pistol', damage: 34, rate: 0.28, range: 90, spread: 0.012, auto: false },
+  smg: { name: 'SMG', damage: 20, rate: 0.09, range: 75, spread: 0.03, auto: true },
 };
 
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+/** Named places the story and the HUD refer to. */
+export const PLACES = {
+  safehouse: { x: -196, z: 196, label: 'Safehouse — Casa Venn' },
+  hospital: { x: 96, z: -16, label: 'Port Azura General' },
+  chopShop: { x: 196, z: -196, label: "Primo's Chop Shop" },
+  paintShop: { x: -196, z: -84, label: 'Azura Paint & Body' },
+  marina: { x: -252, z: 60, label: 'Marina Azul' },
+  vault: { x: -238, z: 44, label: 'Marina Vault' },
+  port: { x: 200, z: -234, label: 'Halden Port Terminal' },
+  palmHills: { x: -216, z: -216, label: 'Palm Hills overlook' },
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
-};
+/** District flavour by city quadrant, used for building heights and colours. */
+export function districtAt(x, z) {
+  if (z > 205) return 'beach';
+  if (x < -185 && z > -40) return 'marina';
+  if (x > 150 && z < -150) return 'port';
+  if (x < -150 && z < -150) return 'hills';
+  if (Math.abs(x) < 95 && Math.abs(z) < 95) return 'downtown';
+  if (x > 60 && z > 40) return 'oldtown';
+  return 'midtown';
+}
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
+/** A tiny deterministic PRNG (mulberry32) so the city never changes between loads. */
+export function createRandom(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
+export const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+export const lerp = (a, b, t) => a + (b - a) * t;
+/** Shortest signed turn from angle a to angle b. */
+export function angleDelta(a, b) {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+export const dist2d = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 
-export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
-};
-
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+/** Nearest point on the road network to (x, z): used by AI drivers and spawns. */
+export function nearestRoadPoint(x, z) {
+  let best = null, bestD = Infinity;
+  for (const r of ROADS) {
+    const dV = Math.abs(x - r); if (dV < bestD) { bestD = dV; best = { x: r, z }; }
+    const dH = Math.abs(z - r); if (dH < bestD) { bestD = dH; best = { x, z: r }; }
+  }
+  return best;
+}
+export function isOnRoad(x, z) {
+  return ROADS.some(r => Math.abs(x - r) < ROAD_W / 2 + 1) || ROADS.some(r => Math.abs(z - r) < ROAD_W / 2 + 1);
+}

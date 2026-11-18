@@ -1,16 +1,16 @@
-// A working gta6-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
-// modules, no library and no network request), and the program hands it in. It copies game/ and
-// screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. Only the plumbing, not an open world: Block
-// Dodger, a plain 2D canvas game where a paddle dodges falling blocks and catches coins, with a
-// title screen, score, lives and levels, game over and restart, flat colours and no sound. Build
-// your own open-world crime game in its place (three.js or any library you vendor under game/),
-// put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover) and run it.
+// AZURA HEAT — hand-in program for the gta6-01 bounty (Node 22, standard library only).
+// The game itself lives in game/: static files a desktop browser loads fully offline
+// (game/index.html, its ES modules, and three.js vendored under game/vendor/). This
+// program copies game/ and screenshots/ into the output directory and writes the
+// dossier.json summary the judge reads, using the vendored make.fun library — the
+// packaging step only; every system of the game (city, driving, police, missions,
+// radio) is in game/src/.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+
+console.log('AZURA HEAT — Port Azura is open. Packing the game and its screenshots.');
 
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
