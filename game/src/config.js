@@ -1,62 +1,25 @@
-// AZURA HEAT — shared configuration for the island city of Port Azura.
-// Everything the other modules agree on lives here: the road grid, the district
-// layout, the tuning numbers for driving / wanted / combat, and the seeded
-// random generator that makes the city identical on every load.
+// config.js — shared constants, seeded RNG and small math helpers for AZURA HEAT.
+// Everything procedural in Port Azura derives from one seed so the island is
+// identical on every load (important for screenshots and mission tuning).
+export const SEED = 1337;
 
-export const TITLE = 'AZURA HEAT';
-export const CITY_SEED = 20261118;
+// Road layout: a square grid. Roads run along these coordinates on both axes.
+export const ROADS = [-280, -210, -140, -70, 0, 70, 140, 210, 280];
+export const ROAD_W = 20;          // asphalt width
+export const ISLAND_R = 470;       // playable island radius
+export const CITY_HALF = 330;      // city ground extent
 
-/** Half-extent of the island in world units; water takes over past the sand. */
-export const ISLAND = 300;
-/** Road centre-lines on both axes. Blocks between neighbouring roads hold buildings. */
-export const ROADS = [-240, -160, -80, 0, 80, 160, 240];
-export const ROAD_W = 15;
-export const LANE = 3.8;
-
-export const PLAYER = {
-  walkSpeed: 7, runSpeed: 12, radius: 0.9, maxHealth: 100,
-  start: { x: 12, z: 196 }, // Beach strip, facing the city.
-};
-export const CAR = {
-  accel: 26, brake: 34, reverse: 12, maxSpeed: 46, maxReverse: 14,
-  steer: 1.9, grip: 7.5, nosBoost: 30, nosMaxSpeed: 68,
-};
-export const WANTED = {
-  sightRange: 55, hideTime: 7, bustedRange: 4.5, bustedTime: 2.4,
-  copCounts: [0, 2, 3, 5, 6, 8],
-};
-export const WEAPONS = {
-  pistol: { name: 'Pistol', damage: 34, rate: 0.28, range: 90, spread: 0.012, auto: false },
-  smg: { name: 'SMG', damage: 20, rate: 0.09, range: 75, spread: 0.03, auto: true },
+export const COLORS = {
+  sky: 0xffb36b, fog: 0xf7a56b, sun: 0xffd9a0,
+  asphalt: 0x3a3f46, sidewalk: 0x9aa0a3, sand: 0xe8cf9a,
+  water: 0x2e7fa8, waterDeep: 0x1d5f86, grass: 0x77a75a,
+  palmTrunk: 0x8a6b46, palmLeaf: 0x3f9e4d,
 };
 
-/** Named places the story and the HUD refer to. */
-export const PLACES = {
-  safehouse: { x: -196, z: 196, label: 'Safehouse — Casa Venn' },
-  hospital: { x: 96, z: -16, label: 'Port Azura General' },
-  chopShop: { x: 196, z: -196, label: "Primo's Chop Shop" },
-  paintShop: { x: -196, z: -84, label: 'Azura Paint & Body' },
-  marina: { x: -252, z: 60, label: 'Marina Azul' },
-  vault: { x: -238, z: 44, label: 'Marina Vault' },
-  port: { x: 200, z: -234, label: 'Halden Port Terminal' },
-  palmHills: { x: -216, z: -216, label: 'Palm Hills overlook' },
-};
-
-/** District flavour by city quadrant, used for building heights and colours. */
-export function districtAt(x, z) {
-  if (z > 205) return 'beach';
-  if (x < -185 && z > -40) return 'marina';
-  if (x > 150 && z < -150) return 'port';
-  if (x < -150 && z < -150) return 'hills';
-  if (Math.abs(x) < 95 && Math.abs(z) < 95) return 'downtown';
-  if (x > 60 && z > 40) return 'oldtown';
-  return 'midtown';
-}
-
-/** A tiny deterministic PRNG (mulberry32) so the city never changes between loads. */
-export function createRandom(seed) {
+// mulberry32 — tiny deterministic PRNG.
+export function rng(seed = SEED) {
   let a = seed >>> 0;
-  return function next() {
+  return function () {
     a |= 0; a = (a + 0x6D2B79F5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
@@ -66,24 +29,40 @@ export function createRandom(seed) {
 
 export const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export const lerp = (a, b, t) => a + (b - a) * t;
-/** Shortest signed turn from angle a to angle b. */
-export function angleDelta(a, b) {
+export function dist2d(ax, az, bx, bz) { const dx = ax - bx, dz = az - bz; return Math.hypot(dx, dz); }
+export function angleLerp(a, b, t) {
   let d = (b - a) % (Math.PI * 2);
   if (d > Math.PI) d -= Math.PI * 2;
   if (d < -Math.PI) d += Math.PI * 2;
-  return d;
+  return a + d * t;
 }
-export const dist2d = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
-
-/** Nearest point on the road network to (x, z): used by AI drivers and spawns. */
-export function nearestRoadPoint(x, z) {
-  let best = null, bestD = Infinity;
-  for (const r of ROADS) {
-    const dV = Math.abs(x - r); if (dV < bestD) { bestD = dV; best = { x: r, z }; }
-    const dH = Math.abs(z - r); if (dH < bestD) { bestD = dH; best = { x, z: r }; }
-  }
+// Snap a value to the nearest road centre line (used by AI steering).
+export function nearestRoad(v) {
+  let best = ROADS[0], bd = Infinity;
+  for (const r of ROADS) { const d = Math.abs(r - v); if (d < bd) { bd = d; best = r; } }
   return best;
 }
-export function isOnRoad(x, z) {
-  return ROADS.some(r => Math.abs(x - r) < ROAD_W / 2 + 1) || ROADS.some(r => Math.abs(z - r) < ROAD_W / 2 + 1);
+export function districtAt(x, z) {
+  if (z > 190) return 'Port Azura Docks';
+  if (x < -190 && z < -120) return 'Palm Hills';
+  if (z < -200) return 'Azura Beach';
+  if (x > 170 && z < -60) return 'The Marina';
+  if (Math.abs(x) < 110 && Math.abs(z) < 110) return 'Downtown';
+  if (x < -120) return 'Old Town';
+  return 'Beach Strip';
 }
+
+// Key locations around Port Azura, shared by missions, HUD and the paint shop.
+export const PLACES = {
+  safehouse: { x: -238, z: -238, label: 'Safehouse — Palm Hills' },
+  chopShop: { x: 238, z: 238, label: "Primo's Chop Shop" },
+  paintShop: { x: -35, z: 105, label: 'Azura Paint & Repair' },
+  marina: { x: 245, z: -105, label: 'Azura Marina' },
+  docks: { x: 0, z: 262, label: 'Port Azura Docks' },
+  beach: { x: -70, z: -262, label: 'Azura Beach' },
+  hospital: { x: 35, z: -35, label: 'Azura General' },
+};
+export const WEAPONS = {
+  pistol: { name: 'Pistol', damage: 34, rate: 0.28, range: 90, spread: 0.012, auto: false },
+  smg: { name: 'SMG', damage: 16, rate: 0.085, range: 75, spread: 0.035, auto: true },
+};

@@ -1,81 +1,80 @@
-// AZURA HEAT — pedestrians: Port Azura citizens strolling the sidewalks and
-// the beach strip. They amble between waypoints with swinging limbs, and they
-// flee — arms up, full sprint — from fast cars, gunfire and explosions nearby.
-import { ROADS, ISLAND, clamp } from './config.js';
-import { buildCharacterMesh } from './player.js';
+// pedestrians.js — citizens strolling the sidewalks. They amble along roads,
+// cross at corners, and flee in panic from fast cars and gunfire.
+import * as THREE from 'three';
+import { ROADS, rng, dist2d, angleLerp } from './config.js';
+import { makeHuman } from './player.js';
 
-const rand = (() => { let s = 192837465; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })();
-const SHIRTS = [0x3e7ac2, 0xf2e6d0, 0x37b8a2, 0xe2a03e, 0xb84a6e, 0x6e8a3e, 0xf5f5f5, 0x8a5fc0];
-const PANTS = [0x2c3550, 0x5a4632, 0x303030, 0x74584a, 0x3a5a78];
+const OUTFITS = [
+  { shirt: 0xe67e22, pants: 0x34495e }, { shirt: 0xecf0f1, pants: 0x7f8c8d },
+  { shirt: 0x1abc9c, pants: 0x2c3e50 }, { shirt: 0xe84393, pants: 0x2d3436 },
+  { shirt: 0xf1c40f, pants: 0x6c5ce7 }, { shirt: 0x00b894, pants: 0x636e72 },
+];
 
-export function createPedestrians(scene, count = 26) {
-  const peds = [];
-  for (let i = 0; i < count; i++) {
-    const mesh = buildCharacterMesh(SHIRTS[i % SHIRTS.length], PANTS[i % PANTS.length], 0xc98d5a + (i % 3) * 0x080402);
-    mesh.scale.setScalar(0.94 + (i % 5) * 0.03);
-    scene.add(mesh);
-    const ped = {
-      mesh, x: 0, z: 0, heading: rand() * Math.PI * 2, speed: 1.6 + rand() * 1.4,
-      phase: rand() * 9, fleeT: 0, tx: 0, tz: 0, hasTarget: false,
-    };
-    respawn(ped, true);
-    peds.push(ped);
+export class Pedestrian {
+  constructor(scene, rand) {
+    const o = OUTFITS[Math.floor(rand() * OUTFITS.length)];
+    this.mesh = makeHuman({ shirt: o.shirt, pants: o.pants, skin: 0xc98d5a + Math.floor(rand() * 0x201008) });
+    this.axis = rand() < 0.5 ? 'x' : 'z';
+    this.dir = rand() < 0.5 ? 1 : -1;
+    this.road = ROADS[Math.floor(rand() * ROADS.length)];
+    this.side = (rand() < 0.5 ? -1 : 1) * 12.6;
+    const along = -300 + rand() * 600;
+    this.mesh.position.set(this.axis === 'x' ? along : this.road + this.side, 0, this.axis === 'x' ? this.road + this.side : along);
+    scene.add(this.mesh);
+    this.walkT = rand() * 9; this.panic = 0; this.speed = 1.6 + rand() * 1.2;
+    this.rand = rand; this.heading = 0;
   }
-  return { peds };
-}
-
-/** Sidewalk waypoint: beside a random road, or along the beach. */
-function pickWaypoint(ped) {
-  if (Math.random() < 0.25) { ped.tx = (Math.random() * 2 - 1) * (ISLAND - 20); ped.tz = 232 + Math.random() * 40; }
-  else {
-    const road = ROADS[Math.floor(Math.random() * ROADS.length)];
-    const along = (Math.random() * 2 - 1) * (ISLAND - 16);
-    const side = Math.random() > 0.5 ? 10.5 : -10.5;
-    if (Math.random() > 0.5) { ped.tx = along; ped.tz = road + side; } else { ped.tx = road + side; ped.tz = along; }
+  get x() { return this.mesh.position.x; }
+  get z() { return this.mesh.position.z; }
+  scare(x, z, radius = 26) {
+    if (dist2d(this.x, this.z, x, z) < radius) this.panic = 2.6;
   }
-  ped.hasTarget = true;
-}
-function respawn(ped, anywhere = false) {
-  pickWaypoint(ped);
-  ped.x = ped.tx; ped.z = ped.tz;
-  pickWaypoint(ped);
-  if (anywhere) { ped.x = (Math.random() * 2 - 1) * ISLAND * 0.8; ped.z = (Math.random() * 2 - 1) * ISLAND * 0.8; }
-}
-
-/** Scare every pedestrian within radius of (x, z): they run from the point. */
-export function scarePeds(peds, x, z, radius = 16) {
-  for (const ped of peds.peds) {
-    if (Math.hypot(ped.x - x, ped.z - z) < radius) ped.fleeT = 2.6;
-  }
-}
-
-export function updatePedestrians(peds, dt, threats) {
-  for (const ped of peds.peds) {
-    // Fast or close threats trigger flight even without a scare event.
-    if (ped.fleeT <= 0) {
-      for (const t of threats) {
-        if (Math.abs(t.speed || 0) > 16 && Math.hypot(ped.x - t.x, ped.z - t.z) < 9) { ped.fleeT = 2.2; break; }
-      }
+  update(dt, threats) {
+    for (const t of threats) {
+      if (t.speed > 16 && dist2d(this.x, this.z, t.x, t.z) < 15) this.panic = Math.max(this.panic, 1.6);
     }
-    let speed = ped.speed, tx = ped.tx, tz = ped.tz;
-    if (ped.fleeT > 0) {
-      ped.fleeT -= dt; speed = 6.4;
-      let ax = 0, az = 0;
-      for (const t of threats) { ax += ped.x - t.x; az += ped.z - t.z; }
-      tx = ped.x + ax; tz = ped.z + az;
-    } else if (!ped.hasTarget || Math.hypot(ped.x - tx, ped.z - tz) < 2) pickWaypoint(ped);
-    const dx = tx - ped.x, dz = tz - ped.z, d = Math.hypot(dx, dz);
-    if (d > 0.2) {
-      ped.heading = Math.atan2(-dx / d, -dz / d);
-      ped.x += (dx / d) * speed * dt; ped.z += (dz / d) * speed * dt;
-      ped.phase += dt * speed * 2.1;
+    this.panic = Math.max(0, this.panic - dt);
+    let mx = 0, mz = 0;
+    if (this.panic > 0) {
+      // run directly away from the nearest threat / city danger point
+      let bx = 0, bz = 0, bd = 1e9;
+      for (const t of threats) { const d = dist2d(this.x, this.z, t.x, t.z); if (d < bd) { bd = d; bx = t.x; bz = t.z; } }
+      mx = this.x - bx; mz = this.z - bz;
+      const l = Math.hypot(mx, mz) || 1; mx /= l; mz /= l;
+      const sp = 6.4;
+      this.mesh.position.x += mx * sp * dt; this.mesh.position.z += mz * sp * dt;
+      this.walkT += dt * 13;
+    } else {
+      if (this.axis === 'x') this.mesh.position.x += this.dir * this.speed * dt;
+      else this.mesh.position.z += this.dir * this.speed * dt;
+      // turn around at the city edge or randomly at junctions
+      const along = this.axis === 'x' ? this.x : this.z;
+      if (Math.abs(along) > 305 || this.rand() < 0.0015) this.dir *= -1;
+      this.walkT += dt * 7;
+      mx = this.axis === 'x' ? this.dir : 0; mz = this.axis === 'z' ? this.dir : 0;
     }
-    ped.x = clamp(ped.x, -ISLAND - 30, ISLAND + 30); ped.z = clamp(ped.z, -ISLAND - 30, ISLAND + 44);
-    const swing = Math.sin(ped.phase) * (ped.fleeT > 0 ? 0.95 : 0.5);
-    const u = ped.mesh.userData;
-    u.legL.rotation.x = swing; u.legR.rotation.x = -swing;
-    u.armL.rotation.x = ped.fleeT > 0 ? -2.6 : -swing; u.armR.rotation.x = ped.fleeT > 0 ? -2.6 : swing;
-    ped.mesh.position.set(ped.x, 0, ped.z);
-    ped.mesh.rotation.y = ped.heading;
+    if (mx || mz) {
+      const target = Math.atan2(mx, mz);
+      this.heading = angleLerp(this.heading, target, Math.min(1, dt * 10));
+      this.mesh.rotation.y = this.heading;
+    }
+    const { armL, armR, legL, legR } = this.mesh.userData.limbs;
+    const sw = Math.sin(this.walkT) * (this.panic > 0 ? 0.95 : 0.55);
+    legL.rotation.x = sw; legR.rotation.x = -sw; armL.rotation.x = -sw; armR.rotation.x = sw;
   }
+}
+
+export function spawnPedestrians(scene, count = 22) {
+  const rand = rng(555);
+  const list = [];
+  for (let i = 0; i < count; i++) list.push(new Pedestrian(scene, rand));
+  return list;
+}
+export function scarePeds(peds, x, z, radius) { for (const p of peds) p.scare(x, z, radius); }
+
+// Frighten every pedestrian inside a radius (gunfire, explosions, near misses).
+export function panicAt(peds, x, z, radius = 30) {
+  let n = 0;
+  for (const p of peds) if (Math.hypot(p.x - x, p.z - z) < radius) { p.panic = Math.max(p.panic, 2.4); n++; }
+  return n;
 }

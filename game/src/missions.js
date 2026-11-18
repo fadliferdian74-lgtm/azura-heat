@@ -1,205 +1,299 @@
-// AZURA HEAT — the story: eight missions chained through Selene Marchetti's
-// phone calls and Primo Almeida's chop shop, against Viktor Halden's port
-// empire. Each mission is a small state machine (start / update / objective)
-// driven by main.js; free-roam continues between missions, and the next
-// mission's marker appears as soon as the previous one pays out.
+// missions.js — Selene's eight jobs for Dario: story missions with dialogue,
+// markers, timers, shootouts, a checkpoint race, a convoy hit and the finale.
+// Free roam in between; the next job's marker appears when one completes.
 import { PLACES, dist2d } from './config.js';
-import { spawnEnemy, enemiesAlive, clearEnemies } from './combat.js';
-import { forceWanted, clearForced } from './wanted.js';
-import { CAR_STYLES } from './vehicles.js';
+import { Vehicle } from './vehicles.js';
+import { Enemy } from './combat.js';
+import { paySound } from './audio.js';
 
-const near = (ctx, x, z, r) => dist2d(ctx.player.x, ctx.player.z, x, z) < r;
-const nearCar = (ctx, car, x, z, r) => car && dist2d(car.x, car.z, x, z) < r;
-
-export const MISSION_DEFS = [
-  { title: 'First Wheels', from: 'Selene Marchetti', reward: 450 },
-  { title: 'Package Run', from: 'Selene Marchetti', reward: 600 },
-  { title: 'Heat Check', from: 'Selene Marchetti', reward: 550 },
-  { title: 'Dockside Diplomacy', from: 'Primo Almeida', reward: 900 },
-  { title: 'Palm Street Grand Prix', from: 'Primo Almeida', reward: 1200 },
-  { title: 'Convoy Hit', from: 'Selene Marchetti', reward: 1400 },
-  { title: 'Skyline Run', from: 'Selene Marchetti', reward: 1800 },
-  { title: 'The Last Job', from: 'Selene Marchetti', reward: 3000 },
+const S = 'Selene', D = 'Dario', P = 'Primo', V = 'Viktor';
+export const MISSIONS = [
+  {
+    name: 'First Wheels', reward: 600, start: PLACES.safehouse,
+    intro: [[S, 'Dario. Fresh start, empty pockets. Primo needs a sports car — there is one parked by the beach strip. Take it.'],
+            [D, 'Steal a car in broad sunset. Subtle.'], [S, 'Deliver it to the chop shop by the docks. Do not scratch it.']],
+    steps: [
+      { type: 'steal', at: { x: -70, z: -238 }, label: 'Steal the parked sports car at the beach' },
+      { type: 'deliver', at: PLACES.chopShop, label: "Deliver the car to Primo's chop shop" },
+    ],
+    outro: [[P, 'Clean lines, clean lift. You drive for me now, eh?']],
+  },
+  {
+    name: 'Package Run', reward: 750, start: PLACES.marina,
+    intro: [[S, 'A package waits at the marina. Timer starts when you grab it — the buyer at Palm Hills hates waiting.']],
+    steps: [
+      { type: 'goto', at: PLACES.marina, radius: 9, label: 'Pick up the package at the marina' },
+      { type: 'goto', at: { x: -238, z: -175 }, radius: 12, timed: 95, inCar: true, label: 'Deliver the package to Palm Hills — fast!' },
+    ],
+    outro: [[S, 'On time. The buyer sends his regards, and his cash.']],
+  },
+  {
+    name: 'Heat Check', reward: 800, start: PLACES.chopShop,
+    intro: [[S, 'Halden tipped the PAPD about your last run. They are coming — three stars of them. Lose the heat.']],
+    steps: [{ type: 'escape', stars: 3, label: 'Lose the 3-star wanted level' }],
+    outro: [[S, 'Gone like a ghost. Halden is running out of friends in uniform.']],
+  },
+  {
+    name: 'Dockside Diplomacy', reward: 1200, start: PLACES.docks,
+    intro: [[S, "Halden's men hold the docks. Take his ledger — it lists every bribe he ever paid."], [V, 'You are on my port, wheelman. Bad choice.']],
+    steps: [
+      { type: 'shootout', at: { x: 0, z: 252 }, count: 4, label: "Clear out Halden's men at the docks" },
+      { type: 'goto', at: { x: 24, z: 268 }, radius: 6, onFoot: true, label: 'Grab the ledger' },
+    ],
+    outro: [[S, 'This ledger ends Halden. Carefully — he knows it is gone.']],
+  },
+  {
+    name: 'Palm Street Grand Prix', reward: 1000, start: { x: -238, z: -70 },
+    intro: [[S, 'Two street racers think they own Palm Street. Six checkpoints. Prove them wrong.']],
+    steps: [{ type: 'race', label: 'Win the Palm Street Grand Prix' }],
+    outro: [[S, 'First place. The whole strip saw it.']],
+  },
+  {
+    name: 'Convoy Hit', reward: 1500, start: PLACES.docks,
+    intro: [[S, "Halden moves cash in an armored van. Ram it until it stops, take the case, and vanish."]],
+    steps: [
+      { type: 'ram', label: 'Ram the armored van until it stops' },
+      { type: 'gotoVan', label: 'Take the cash case from the van' },
+      { type: 'escape', stars: 3, label: 'Escape with the cash — lose the heat' },
+    ],
+    outro: [[S, 'That was his payroll. He will feel that one.']],
+  },
+  {
+    name: 'Skyline Run', reward: 1800, start: PLACES.marina,
+    intro: [[S, 'A collector car, one careful owner, and every cop on the island awake. Marina to the safehouse. Do NOT dent it.']],
+    steps: [
+      { type: 'stealFragile', at: { x: 238, z: -140 }, label: 'Take the collector car at the marina' },
+      { type: 'deliverFragile', at: PLACES.safehouse, label: 'Deliver it to the safehouse — gently, under fire' },
+    ],
+    outro: [[S, 'Not a scratch. You are wasted on crime, Dario.']],
+  },
+  {
+    name: 'The Last Job', reward: 4000, start: PLACES.marina,
+    intro: [[S, "Halden's vault sits under the marina office. Crack it, grab everything, and get home. Five stars, Dario. Come back alive."],
+            [V, 'Take one step on my dock tonight and you swim home.']],
+    steps: [
+      { type: 'goto', at: { x: 252, z: -88 }, radius: 8, onFoot: true, label: 'Reach the marina vault on foot' },
+      { type: 'vault', at: { x: 252, z: -88 }, hold: 6, label: 'Crack the vault — stay close' },
+      { type: 'escapeTo', at: PLACES.safehouse, stars: 5, label: 'Escape to the safehouse!' },
+    ],
+    outro: [[S, 'It is over. Halden is finished, and Port Azura is ours. Enjoy the sunset, partner.']],
+  },
 ];
 
-function m1() {
-  let step = 0, car = null;
-  return {
-    start(ctx) {
-      car = ctx.spawnCar(CAR_STYLES[1], 84, 236, Math.PI / 2); car.missionCar = true;
-      ctx.dialogue([['Selene', 'Dario. There is a yellow Comet parked by the beach strip, keys in, owner careless.'], ['Selene', 'Take it to Primo at the chop shop, north-east port side. Try not to gift-wrap it around a palm.']]);
-    },
-    objective: () => step === 0 ? 'Steal the yellow sports car on the beach strip' : "Deliver the car to Primo's Chop Shop",
-    marker(ctx) { return step === 0 ? { x: car.x, z: car.z } : { x: PLACES.chopShop.x, z: PLACES.chopShop.z }; },
-    update(ctx) {
-      if (step === 0 && ctx.player.inCar === car) { step = 1; ctx.crime('theft'); ctx.dialogue([['Primo', 'You are in? Good. Bring her home, paisano.']]); }
-      else if (step === 1 && nearCar(ctx, car, PLACES.chopShop.x, PLACES.chopShop.z, 10)) { ctx.removeCar(car); return 'done'; }
-    },
-  };
-}
+export const RACE_CHECKPOINTS = [
+  { x: -238, z: -70 }, { x: -140, z: -70 }, { x: -140, z: 70 }, { x: 0, z: 70 },
+  { x: 0, z: -70 }, { x: 70, z: -140 }, { x: -70, z: -238 }, { x: -238, z: -238 },
+];
 
-function m2() {
-  let step = 0, timer = 0;
-  return {
-    start(ctx) { ctx.dialogue([['Selene', 'A package waits at Marina Azul, west docks. Then it crosses town to Old Town — fast. Halden\'s people are counting the minutes too.']]); },
-    objective: () => step === 0 ? 'Pick up the package at Marina Azul' : `Deliver the package to Old Town — ${Math.max(0, Math.ceil(timer))}s`,
-    marker: () => step === 0 ? { x: PLACES.marina.x, z: PLACES.marina.z } : { x: 120, z: 120 },
-    update(ctx, dt) {
-      if (step === 0 && near(ctx, PLACES.marina.x, PLACES.marina.z, 9)) { step = 1; timer = 150; ctx.sfx('pickup'); ctx.dialogue([['Selene', 'Got it? Move. Clock is running.']]); }
-      else if (step === 1) {
-        timer -= dt; ctx.setTimer(timer);
-        if (near(ctx, 120, 120, 10)) return 'done';
-        if (timer <= 0) return 'fail';
+export class MissionManager {
+  constructor(G) {
+    this.G = G; this.active = null; this.stepIdx = 0;
+    this.targetCar = null; this.van = null; this.racers = [];
+    this.raceIdx = 0; this.stepT = 0; this.holdT = 0; this.cleanup = [];
+  }
+  get current() { return this.active ? this.active.steps[this.stepIdx] : null; }
+  pointToStart() {
+    const G = this.G;
+    if (G.missionIndex >= MISSIONS.length) {
+      G.marker = null; G.hud.setObjective('Free roam — Port Azura is yours. Visit the safehouse to save.');
+      return;
+    }
+    const m = MISSIONS[G.missionIndex];
+    G.marker = { x: m.start.x, z: m.start.z };
+    G.hud.setObjective('Next job: "' + m.name + '" — head to the gold marker');
+  }
+  tryStart() {
+    const G = this.G;
+    if (this.active || G.missionIndex >= MISSIONS.length) return false;
+    const m = MISSIONS[G.missionIndex];
+    if (dist2d(G.player.pos.x, G.player.pos.z, m.start.x, m.start.z) > 14) return false;
+    this.active = m; this.stepIdx = 0; this.stepT = 0;
+    for (const [n, t] of m.intro) G.hud.dialogue(n, t);
+    G.hud.banner(m.name, 'Mission started');
+    G.audio.blip(520, 0.15, 0.12, 'triangle');
+    this.beginStep();
+    return true;
+  }
+  track(obj) { this.cleanup.push(obj); return obj; }
+  beginStep() {
+    const G = this.G, st = this.current;
+    if (!st) return;
+    this.stepT = 0; this.holdT = 0;
+    G.missionTimer = st.timed || 0;
+    if (st.type === 'steal' || st.type === 'stealFragile') {
+      const car = new Vehicle(G.scene, st.at.x, st.at.z, Math.PI / 2, st.type === 'stealFragile' ? 0xf5eeda : 0xd64541, 'sport');
+      car.driver = 'mission'; this.targetCar = car; G.cars.push(car); this.track(car);
+      G.marker = { x: st.at.x, z: st.at.z };
+    } else if (st.type === 'escape' || st.type === 'escapeTo') {
+      G.wanted.setForced(st.stars || 3);
+      G.marker = st.at ? { x: st.at.x, z: st.at.z } : null;
+    } else if (st.type === 'shootout') {
+      for (let i = 0; i < st.count; i++) {
+        const e = new Enemy(G.scene, st.at.x + (i - 1.5) * 9, st.at.z + (i % 2) * 10 - 5);
+        G.enemies.push(e); this.track(e);
       }
-    },
-  };
-}
-
-function m3() {
-  let started = false;
-  return {
-    start(ctx) { ctx.dialogue([['Selene', 'The PD wants to make an example of the new wheelman. Let them chase. Then disappear — lose the heat completely.']]); },
-    objective: () => 'Lose the cops — get your wanted level to zero',
-    marker: () => null,
-    update(ctx) {
-      if (!started) { started = true; forceWanted(ctx.wanted, 3); ctx.crime('mission'); }
-      if (started && ctx.wanted.level === 0 && ctx.wanted.heat < 0.4) { clearForced(ctx.wanted); return 'done'; }
-      if (ctx.wanted.level > 0) ctx.wanted.forced = 0; // decay allowed; force was only the kick
-    },
-  };
-}
-
-function m4() {
-  let step = 0;
-  return {
-    start(ctx) { ctx.dialogue([['Primo', 'Halden keeps a ledger at his port terminal — who he pays, who he buries. His men guard it.'], ['Primo', 'Take the ledger, Dario. Leave the rest to me.']]); },
-    objective: (ctx) => step === 0 ? 'Drive to the Halden Port Terminal' : step === 1 ? `Clear out Halden's men (${ctx.enemiesLeft()} left)` : 'Grab the ledger',
-    marker: () => ({ x: PLACES.port.x, z: PLACES.port.z }),
-    update(ctx) {
-      if (step === 0 && near(ctx, PLACES.port.x, PLACES.port.z, 16)) {
-        step = 1;
-        for (const [x, z] of [[186, -236], [204, -232], [196, -242], [214, -238]]) spawnEnemy(ctx.combat, x, z);
-        ctx.dialogue([['Halden Man', 'Wrong dock, friend. Walk away or fall down.']]);
-      } else if (step === 1 && ctx.enemiesLeft() === 0) { step = 2; ctx.sfx('pickup'); }
-      else if (step === 2 && near(ctx, PLACES.port.x, PLACES.port.z, 6)) { clearEnemies(ctx.combat); ctx.crime('mission'); return 'done'; }
-    },
-  };
-}
-
-function m5() {
-  const ROUTE = [[80, 240], [160, 160], [80, 80], [160, 0], [80, -80], [0, -160], [-80, -80], [-160, 0], [-80, 80], [0, 160], [80, 236]];
-  let cp = 0, racers = [], playerDone = false;
-  return {
-    start(ctx) {
-      racers = ROUTE.map(() => 0); // progress per AI racer, driven by main's traffic-style stepper via ctx.raceAi
-      ctx.raceSetup(ROUTE);
-      ctx.dialogue([['Primo', 'Grand Prix, Palm Street rules: hit every checkpoint, finish first. My money is on you, so do not embarrass us both.']]);
-    },
-    objective: (ctx) => `Grand Prix — checkpoint ${Math.min(cp + 1, ROUTE.length)}/${ROUTE.length}${ctx.racePosition ? ` • position ${ctx.racePosition()}` : ''}`,
-    marker: () => ROUTE[Math.min(cp, ROUTE.length - 1)] ? { x: ROUTE[Math.min(cp, ROUTE.length - 1)][0], z: ROUTE[Math.min(cp, ROUTE.length - 1)][1] } : null,
-    update(ctx) {
-      const target = ROUTE[cp];
-      if (!target) return playerDone ? 'done' : 'fail';
-      const inCar = ctx.player.inCar;
-      if (inCar && dist2d(inCar.x, inCar.z, target[0], target[1]) < 13) { cp++; ctx.sfx('pickup'); if (cp >= ROUTE.length) { playerDone = true; return ctx.racePosition() <= 1 ? 'done' : 'fail'; } }
-      if (ctx.raceAiFinished && ctx.raceAiFinished()) return 'fail';
-    },
-    cleanup(ctx) { ctx.raceTeardown(); },
-  };
-}
-
-function m6() {
-  let step = 0, van = null;
-  return {
-    start(ctx) {
-      van = ctx.spawnCar({ kind: 'van', color: 0x3a3f46, top: 30 }, 160, -160, Math.PI);
-      van.health = 260; van.missionVan = true;
-      ctx.vanDriver = van;
-      ctx.dialogue([['Selene', 'Halden moves cash in an armored van on the north loop. Ram it until it stops, take the case, then lose the three stars that follow.']]);
-    },
-    objective: () => step === 0 ? `Ram the armored van until it stops (${Math.max(0, Math.ceil(van ? van.health : 0))} integrity)` : step === 1 ? 'Take the cash case' : 'Escape — lose the cops',
-    marker: () => van ? { x: van.x, z: van.z } : null,
-    update(ctx) {
-      if (!van) return 'fail';
-      if (step === 0 && van.health <= 0) { step = 1; van.speed = 0; ctx.vanDriver = null; ctx.dialogue([['Selene', 'It stopped! Grab the case, go!']]); }
-      else if (step === 1 && near(ctx, van.x, van.z, 5)) { step = 2; ctx.sfx('cash'); forceWanted(ctx.wanted, 3); }
-      else if (step === 2) { ctx.wanted.forced = 0; if (ctx.wanted.level === 0) { clearForced(ctx.wanted); ctx.removeCar(van); return 'done'; } }
-    },
-    cleanup(ctx) { ctx.vanDriver = null; },
-  };
-}
-
-function m7() {
-  let car = null;
-  return {
-    start(ctx) {
-      car = ctx.spawnCar(CAR_STYLES[0], 232, -168, Math.PI / 2); car.missionCar = true; car.fragile = true;
-      forceWanted(ctx.wanted, 5);
-      ctx.dialogue([['Selene', 'A client\'s Comet sits at the port — and the whole PD is already looking for it. Five stars, helicopter, everything.'], ['Selene', 'Deliver it to the Palm Hills overlook without a scratch more than a whisper.']]);
-    },
-    objective: () => 'Deliver the Comet to Palm Hills — keep it in one piece',
-    marker: () => ({ x: PLACES.palmHills.x, z: PLACES.palmHills.z }),
-    update(ctx) {
-      if (car.health < 35) return 'fail';
-      if (ctx.player.inCar === car && nearCar(ctx, car, PLACES.palmHills.x, PLACES.palmHills.z, 11)) {
-        clearForced(ctx.wanted); ctx.wanted.level = 0; ctx.wanted.heat = 0; ctx.removeCar(car); return 'done';
+      G.marker = { x: st.at.x, z: st.at.z };
+    } else if (st.type === 'race') {
+      this.raceIdx = 0;
+      for (let i = 0; i < 2; i++) {
+        const r = new Vehicle(G.scene, -238 + (i + 1) * 7, -52, Math.PI, i ? 0x3f7fd1 : 0xf2b035, 'sport');
+        r.driver = 'racer'; r.userData = { cp: 0 };
+        this.racers.push(r); G.cars.push(r); this.track(r);
       }
-    },
-    cleanup(ctx) { clearForced(ctx.wanted); },
-  };
-}
+      G.marker = RACE_CHECKPOINTS[0];
+      G.missionTimer = 150;
+    } else if (st.type === 'ram') {
+      const van = new Vehicle(G.scene, 70, 210, 0, 0x707880, 'van');
+      van.driver = 'convoy'; van.health = 260; van.userData = { wp: 0 };
+      this.van = van; G.cars.push(van); this.track(van);
+      G.marker = null;
+    } else if (st.type === 'gotoVan') {
+      G.marker = this.van ? { x: this.van.x, z: this.van.z } : null;
+    } else {
+      G.marker = st.at ? { x: st.at.x, z: st.at.z } : null;
+    }
+    G.hud.setObjective(st.label || '');
+  }
+  advance() {
+    const G = this.G;
+    this.stepIdx++;
+    if (this.stepIdx >= this.active.steps.length) return this.complete();
+    G.audio.pickup();
+    this.beginStep();
+  }
+  complete() {
+    const G = this.G, m = this.active;
+    G.cash += m.reward;
+    for (const [n, t] of m.outro) G.hud.dialogue(n, t);
+    G.hud.banner('MISSION COMPLETE', m.name + '  +$' + m.reward);
+    G.audio.sting(true); paySound(G.audio);
+    G.wanted.clearForced();
+    this.endMission();
+    G.missionIndex++;
+    this.pointToStart();
+  }
+  fail(reason) {
+    const G = this.G;
+    if (!this.active) return;
+    G.hud.banner('MISSION FAILED', reason);
+    G.audio.sting(false);
+    G.wanted.clearForced(); G.missionTimer = 0;
+    this.endMission();
+    this.pointToStart();
+  }
+  endMission() {
+    const G = this.G;
+    for (const o of this.cleanup) {
+      if (o instanceof Vehicle) { o.remove(G.scene); const i = G.cars.indexOf(o); if (i >= 0) G.cars.splice(i, 1); }
+      else if (o instanceof Enemy) { o.remove(G.scene); const i = G.enemies.indexOf(o); if (i >= 0) G.enemies.splice(i, 1); }
+    }
+    this.cleanup = []; this.racers = []; this.targetCar = null; this.van = null;
+    this.active = null; G.missionTimer = 0;
+  }
+  onPlayerEnterCar(car) {
+    const st = this.current;
+    if (!st) return;
+    if ((st.type === 'steal' || st.type === 'stealFragile') && car === this.targetCar) {
+      if (st.type === 'stealFragile') this.G.wanted.setForced(5);
+      this.advance();
+    }
+  }
+  onRam(van, amount) {
+    const st = this.current;
+    if (st && st.type === 'ram' && van === this.van) {
+      van.damage(amount);
+      this.G.wanted.report('ram', true);
+      if (van.health <= 0) { van.dead = false; van.health = 1; this.advance(); }
+    }
+  }
 
-function m8() {
-  let step = 0, hold = 0;
-  return {
-    start(ctx) { ctx.dialogue([['Selene', 'Last job, Dario. The marina vault, west docks. Crack it, and the whole PD comes down on you — five stars.'], ['Selene', 'Then get home. Casa Venn. End it where it started.']]); },
-    objective: () => step === 0 ? 'Reach the Marina Vault' : step === 1 ? `Cracking the vault… ${Math.ceil(5 - hold)}s — hold your ground` : 'Escape to the Safehouse — Casa Venn',
-    marker: () => step < 2 ? { x: PLACES.vault.x, z: PLACES.vault.z } : { x: PLACES.safehouse.x, z: PLACES.safehouse.z },
-    update(ctx, dt) {
-      if (step === 0 && !ctx.player.inCar && near(ctx, PLACES.vault.x, PLACES.vault.z, 6)) step = 1;
-      else if (step === 1) {
-        if (near(ctx, PLACES.vault.x, PLACES.vault.z, 7)) { hold += dt; if (hold >= 5) { step = 2; ctx.crime('vault'); forceWanted(ctx.wanted, 5); ctx.sfx('cash'); ctx.dialogue([['Selene', 'That\'s it! GO. Home, Dario — get home!']]); } }
-        else hold = Math.max(0, hold - dt * 2);
-      } else if (step === 2 && near(ctx, PLACES.safehouse.x, PLACES.safehouse.z, 10)) { clearForced(ctx.wanted); ctx.wanted.level = 0; ctx.wanted.heat = 0; return 'done'; }
-    },
-    cleanup(ctx) { clearForced(ctx.wanted); },
-  };
-}
-
-const BUILDERS = [m1, m2, m3, m4, m5, m6, m7, m8];
-
-export function createMissions() {
-  return {
-    index: 0, active: null, state: null, betweenT: 0,
-    get total() { return BUILDERS.length; },
-    get done() { return this.index >= BUILDERS.length; },
-    start(ctx) {
-      if (this.done) return;
-      this.state = BUILDERS[this.index]();
-      this.active = MISSION_DEFS[this.index];
-      this.state.start(ctx);
-      ctx.hud.showBanner('MISSION: ' + this.active.title, 'For ' + this.active.from, 3.4);
-    },
-    update(ctx, dt) {
-      if (!this.state) return null;
-      const result = this.state.update(ctx, dt);
-      if (result === 'done') {
-        const reward = this.active.reward;
-        if (this.state.cleanup) this.state.cleanup(ctx);
-        this.state = null; this.active = null; this.index++;
-        return { done: true, reward };
+  update(dt) {
+    const G = this.G, st = this.current;
+    if (!st) return;
+    this.stepT += dt;
+    const p = G.player.pos;
+    if (st.timed || st.type === 'race') {
+      G.missionTimer -= dt;
+      if (G.missionTimer <= 0) return this.fail(st.type === 'race' ? 'Out of time.' : 'The buyer gave up waiting.');
+    }
+    switch (st.type) {
+      case 'goto': {
+        if (st.inCar && !G.player.car) break;
+        if (st.onFoot && G.player.car) break;
+        if (dist2d(p.x, p.z, st.at.x, st.at.z) < (st.radius || 10)) this.advance();
+        break;
       }
-      if (result === 'fail') {
-        if (this.state.cleanup) this.state.cleanup(ctx);
-        this.state = null;
-        return { fail: true };
+      case 'deliver': case 'deliverFragile': {
+        if (G.player.car === this.targetCar && dist2d(p.x, p.z, st.at.x, st.at.z) < 13) {
+          if (st.type === 'deliverFragile') G.wanted.clear();
+          const car = this.targetCar;
+          this.advance();
+          if (car && G.player.car === car) { /* player keeps the car */ }
+        }
+        break;
       }
-      return null;
-    },
-    retry(ctx) { if (!this.done && !this.state) this.start(ctx); },
-    objective(ctx) { return this.state ? this.state.objective(ctx) : null; },
-    marker(ctx) { return this.state ? this.state.marker(ctx) : (this.done ? null : { x: PLACES.safehouse.x, z: PLACES.safehouse.z }); },
-    nextTitle() { return this.done ? null : MISSION_DEFS[this.index].title; },
-  };
+      case 'escape': {
+        if (G.wanted.sightT > 4.5 && this.stepT > 3) { G.wanted.clear(); this.advance(); }
+        break;
+      }
+      case 'escapeTo': {
+        if (dist2d(p.x, p.z, st.at.x, st.at.z) < 14 && G.wanted.sightT > 2) { G.wanted.clear(); this.advance(); }
+        break;
+      }
+      case 'shootout': {
+        if (G.enemies.every(e => e.dead)) this.advance();
+        break;
+      }
+      case 'race': {
+        // AI racers chase the same checkpoints
+        for (const r of this.racers) {
+          const cp = RACE_CHECKPOINTS[r.userData.cp % RACE_CHECKPOINTS.length];
+          const want = Math.atan2(-(cp.x - r.x), -(cp.z - r.z));
+          r.heading += (((want - r.heading + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, dt * 2.4);
+          r.cruise(dt, 26);
+          if (dist2d(r.x, r.z, cp.x, cp.z) < 13) r.userData.cp++;
+        }
+        const cp = RACE_CHECKPOINTS[this.raceIdx];
+        if (cp && G.player.car && dist2d(p.x, p.z, cp.x, cp.z) < 15) {
+          this.raceIdx++; G.audio.pickup();
+          if (this.raceIdx >= RACE_CHECKPOINTS.length) { this.advance(); break; }
+          G.marker = RACE_CHECKPOINTS[this.raceIdx];
+          G.hud.setObjective('Checkpoint ' + (this.raceIdx + 1) + ' of ' + RACE_CHECKPOINTS.length);
+        }
+        break;
+      }
+      case 'ram': {
+        const van = this.van;
+        if (van) {
+          const WPS = [{ x: 70, z: 210 }, { x: 210, z: 210 }, { x: 210, z: 70 }, { x: 70, z: 70 }];
+          const wp = WPS[van.userData.wp % WPS.length];
+          const want = Math.atan2(-(wp.x - van.x), -(wp.z - van.z));
+          van.heading += (((want - van.heading + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, dt * 2);
+          van.cruise(dt, 17);
+          if (dist2d(van.x, van.z, wp.x, wp.z) < 14) van.userData.wp++;
+          G.marker = { x: van.x, z: van.z };
+        }
+        break;
+      }
+      case 'gotoVan': {
+        if (this.van) {
+          G.marker = { x: this.van.x, z: this.van.z };
+          if (!G.player.car && dist2d(p.x, p.z, this.van.x, this.van.z) < 5) {
+            G.hud.dialogue(P, 'Got the case. Now RUN.');
+            this.advance();
+          }
+        }
+        break;
+      }
+      case 'vault': {
+        if (!G.player.car && dist2d(p.x, p.z, st.at.x, st.at.z) < (st.radius || 9)) {
+          this.holdT += dt;
+          G.hud.setObjective('Cracking the vault… ' + Math.floor(this.holdT) + ' / ' + st.hold + 's');
+          if (this.holdT === dt || Math.floor(this.holdT) === 2) G.wanted.report('trespass', false);
+          if (this.holdT >= st.hold) { G.audio.pickup(); this.advance(); }
+        } else this.holdT = Math.max(0, this.holdT - dt * 0.5);
+        break;
+      }
+    }
+  }
 }
-export { enemiesAlive };

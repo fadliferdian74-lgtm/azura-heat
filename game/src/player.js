@@ -1,98 +1,85 @@
-// AZURA HEAT — Dario Venn on foot: a low-poly box-and-capsule character with
-// swinging-limb walk/run animation, a third-person orbit camera rig, sprinting,
-// health with slow regeneration, and the enter/exit-car handoff.
+// player.js — Dario Venn: low-poly third-person character with limb-swing walk
+// animation, plus on-foot movement + orbit camera control.
 import * as THREE from 'three';
-import { PLAYER, clamp } from './config.js';
+import { clamp, angleLerp } from './config.js';
 
-function limb(w, h, d, color, x, y, z, parent) {
-  const geo = new THREE.BoxGeometry(w, h, d); geo.translate(0, -h / 2, 0);
-  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color }));
-  m.position.set(x, y, z); parent.add(m); return m;
-}
-
-/** Build the character. Forward is -Z; limbs hang from pivot groups. */
-export function buildCharacterMesh(shirt = 0xe2543e, pants = 0x2c3550, skin = 0xd9a066) {
+export function makeHuman({ shirt = 0x2e6fd1, pants = 0x2b2b30, skin = 0xd9a066, hair = 0x201812 } = {}) {
   const g = new THREE.Group();
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.85, 0.42),
-    new THREE.MeshLambertMaterial({ color: shirt }));
-  torso.position.y = 1.32; g.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8),
-    new THREE.MeshLambertMaterial({ color: skin }));
-  head.position.y = 2.02; g.add(head);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.34, 0.16, 10),
-    new THREE.MeshLambertMaterial({ color: 0x22262e }));
-  cap.position.y = 2.22; g.add(cap);
-  const armL = limb(0.22, 0.78, 0.22, shirt, -0.52, 1.72, 0, g);
-  const armR = limb(0.22, 0.78, 0.22, shirt, 0.52, 1.72, 0, g);
-  const legL = limb(0.26, 0.92, 0.26, pants, -0.2, 0.92, 0, g);
-  const legR = limb(0.26, 0.92, 0.26, pants, 0.2, 0.92, 0, g);
-  // The held weapon sits in the right hand and appears when a gun is drawn.
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.16, 0.52),
-    new THREE.MeshLambertMaterial({ color: 0x14161a }));
-  gun.position.set(0, -0.78, -0.2); gun.visible = false; armR.add(gun);
-  g.userData = { armL, armR, legL, legR, gun };
+  const sm = new THREE.MeshLambertMaterial({ color: shirt });
+  const pm = new THREE.MeshLambertMaterial({ color: pants });
+  const km = new THREE.MeshLambertMaterial({ color: skin });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.78, 0.34), sm); torso.position.y = 1.18; g.add(torso);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.44, 0.4), km); head.position.y = 1.82; g.add(head);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.14, 0.44), new THREE.MeshLambertMaterial({ color: hair }));
+  cap.position.y = 2.06; g.add(cap);
+  function limb(mat, x, y, len, r = 0.11) {
+    const pivot = new THREE.Group(); pivot.position.set(x, y, 0);
+    const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 3, 8), mat);
+    m.position.y = -len / 2; pivot.add(m); g.add(pivot); return pivot;
+  }
+  const armL = limb(sm, -0.42, 1.52, 0.62), armR = limb(sm, 0.42, 1.52, 0.62);
+  const legL = limb(pm, -0.17, 0.82, 0.74, 0.13), legR = limb(pm, 0.17, 0.82, 0.74, 0.13);
+  g.userData.limbs = { armL, armR, legL, legR };
+  g.userData.head = head;
   return g;
 }
 
-export function createPlayer(scene) {
-  const mesh = buildCharacterMesh();
-  scene.add(mesh);
-  return {
-    mesh, x: PLAYER.start.x, z: PLAYER.start.z, heading: 0, // heading 0 faces -Z: north, into the city
-    health: PLAYER.maxHealth, radius: PLAYER.radius, speedNow: 0,
-    inCar: null, walkPhase: 0, regenT: 0, dead: false, weapon: 'pistol', gunDrawn: false,
-  };
-}
-
-/**
- * Move the player on foot. moveX/moveZ are camera-relative wish directions,
- * sprint multiplies speed; limbs swing with distance travelled.
- */
-export function stepPlayer(player, moveX, moveZ, sprint, dt) {
-  const mag = Math.hypot(moveX, moveZ);
-  if (mag > 0.05) {
-    const speed = sprint ? PLAYER.runSpeed : PLAYER.walkSpeed;
-    const nx = moveX / mag, nz = moveZ / mag;
-    player.x += nx * speed * dt; player.z += nz * speed * dt;
-    player.heading = Math.atan2(-nx, -nz);
-    player.speedNow = speed;
-    player.walkPhase += dt * speed * 1.6;
-  } else player.speedNow = 0;
-  const swing = Math.sin(player.walkPhase) * (player.speedNow > 8 ? 0.85 : 0.55) * (mag > 0.05 ? 1 : 0);
-  const u = player.mesh.userData;
-  u.legL.rotation.x = swing; u.legR.rotation.x = -swing;
-  if (player.gunDrawn) { u.armR.rotation.x = -1.35; u.armL.rotation.x = swing * 0.4; }
-  else { u.armL.rotation.x = -swing; u.armR.rotation.x = swing; }
-  player.mesh.position.set(player.x, 0, player.z);
-  player.mesh.rotation.y = player.heading;
-  // Health regeneration after a quiet moment.
-  player.regenT -= dt;
-  if (player.regenT <= 0 && player.health > 0) player.health = Math.min(PLAYER.maxHealth, player.health + 2.4 * dt);
-}
-
-export function damagePlayer(player, amount) {
-  player.health = Math.max(0, player.health - amount);
-  player.regenT = 5;
-  if (player.health <= 0) player.dead = true;
-}
-
-/** Third-person camera: orbit yaw/pitch around a target, smoothed. */
-export function createCameraRig() {
-  return { yaw: 0, pitch: 0.32, dist: 8.5, cur: null };
-}
-export function updateCamera(camera, rig, tx, ty, tz, dt) {
-  // Place the camera behind the yaw direction, above the shoulder line.
-  const px = tx + Math.sin(rig.yaw) * Math.cos(rig.pitch) * rig.dist;
-  const pz = tz + Math.cos(rig.yaw) * Math.cos(rig.pitch) * rig.dist;
-  const py = ty + Math.sin(rig.pitch) * rig.dist + 1.2;
-  if (!rig.cur) rig.cur = new THREE.Vector3(px, py, pz);
-  const k = 1 - Math.pow(0.0001, dt);
-  rig.cur.x += (px - rig.cur.x) * k; rig.cur.y += (py - rig.cur.y) * k; rig.cur.z += (pz - rig.cur.z) * k;
-  camera.position.copy(rig.cur);
-  camera.lookAt(tx, ty + 1.4, tz);
-}
-export function setGunDrawn(player, drawn) {
-  player.gunDrawn = drawn;
-  player.mesh.userData.gun.visible = drawn;
+export class Player {
+  constructor(scene, x, z) {
+    this.mesh = makeHuman({});
+    this.mesh.position.set(x, 0, z);
+    scene.add(this.mesh);
+    this.heading = 0; this.walkT = 0; this.speedNow = 0;
+    this.health = 100; this.dead = false;
+    this.car = null;            // Vehicle when driving
+    this.weapon = 'pistol';
+    this.aiming = false;
+  }
+  get x() { return this.mesh.position.x; }
+  get z() { return this.mesh.position.z; }
+  get pos() { return this.car ? this.car.mesh.position : this.mesh.position; }
+  hurt(n) {
+    this.health = Math.max(0, this.health - n);
+    if (this.health <= 0) this.dead = true;
+  }
+  heal(dt) { if (!this.dead) this.health = Math.min(100, this.health + dt * 4.5); }
+  // WASD relative to camera yaw; sprint with shift. Returns true if moving.
+  move(dt, keys, camYaw) {
+    let ix = 0, iz = 0;
+    if (keys['KeyW']) iz -= 1; if (keys['KeyS']) iz += 1;
+    if (keys['KeyA']) ix -= 1; if (keys['KeyD']) ix += 1;
+    const moving = ix !== 0 || iz !== 0;
+    const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
+    const speed = sprint ? 11.5 : 6.4;
+    if (moving) {
+      const len = Math.hypot(ix, iz); ix /= len; iz /= len;
+      const sin = Math.sin(camYaw), cos = Math.cos(camYaw);
+      const wx = ix * cos - iz * sin, wz = ix * sin + iz * cos;
+      this.mesh.position.x += wx * speed * dt;
+      this.mesh.position.z += wz * speed * dt;
+      const target = Math.atan2(wx, wz);
+      this.heading = angleLerp(this.heading, target, Math.min(1, dt * 12));
+      this.walkT += dt * (sprint ? 13 : 9);
+      this.speedNow = speed;
+    } else { this.walkT = 0; this.speedNow = 0; }
+    this.mesh.rotation.y = this.heading;
+    const { armL, armR, legL, legR } = this.mesh.userData.limbs;
+    const sw = moving ? Math.sin(this.walkT) * 0.75 : 0;
+    legL.rotation.x = sw; legR.rotation.x = -sw;
+    if (this.aiming) { armR.rotation.x = -1.45; armL.rotation.x = -1.2; }
+    else { armL.rotation.x = -sw; armR.rotation.x = sw; }
+    this.mesh.position.y = moving ? Math.abs(Math.sin(this.walkT)) * 0.07 : 0;
+    return moving;
+  }
+  syncToCar() {
+    if (this.car) { this.mesh.visible = false; }
+    else this.mesh.visible = true;
+  }
 }
 export { clamp };
+
+// Face the character toward a world point (used while aiming / in dialogue).
+export function faceToward(player, x, z) {
+  player.heading = Math.atan2(x - player.x, z - player.z);
+  player.mesh.rotation.y = player.heading;
+}
